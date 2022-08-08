@@ -1,0 +1,140 @@
+version: "3.7"
+
+services:
+    jollyroger-piavpn:
+        image: qmcgaw/gluetun:latest
+        container_name: jollyroger-piavpn
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+            - UMASK=022
+            - VPN_SERVICE_PROVIDER=private internet access
+            - OPENVPN_USER=$PIA_USER
+            - OPENVPN_PASSWORD=$PIA_PASS
+            - SERVER_REGIONS=$PIA_REGION
+            - BLOCK_SURVEILLANCE=on
+            - BLOCK_ADS=on
+        cap_add:
+            - NET_ADMIN
+        networks:
+            app:
+        restart: unless-stopped
+
+    jollyroger-jackett:
+        image: linuxserver/jackett
+        container_name: jollyroger-jackett
+        network_mode: "service:jollyroger-piavpn"
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+            #- RUN_OPTS=-t -l # uncomment to get full debug logs
+        depends_on:
+            - jollyroger-piavpn
+        volumes:
+            - $CONTAINER_DATA_PATH/jackett:/config
+        restart: unless-stopped
+        
+    jollyroger-qbittorrent:
+        image: linuxserver/qbittorrent
+        container_name: jollyroger-qbittorrent
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+            - UMASK=022
+            - WEBUI_PORT=8080
+        volumes:
+            - $CONTAINER_DATA_PATH/qbittorrent:/config
+            - $DOWNLOAD_STORAGE_PATH:/downloads
+        network_mode: "service:jollyroger-piavpn"
+        depends_on:
+            - jollyroger-piavpn
+        restart: unless-stopped
+
+    jollyroger-radarr:
+        image: linuxserver/radarr
+        container_name: jollyroger-radarr
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+            - UMASK=022
+        volumes:
+            - $CONTAINER_DATA_PATH/radarr:/config
+            - $MEDIA_STORAGE_PATH/Anime-Movies:/media/anime-movies
+            - $MEDIA_STORAGE_PATH/Kids-Movies:/media/kids-movies
+            - $MEDIA_STORAGE_PATH/Movies:/media/movies
+            - $DOWNLOAD_STORAGE_PATH:/downloads
+        network_mode: "service:jollyroger-piavpn"
+        depends_on:
+            - jollyroger-piavpn
+            - jollyroger-jackett
+            - jollyroger-qbittorrent
+        restart: unless-stopped
+
+    jollyroger-sonarr:
+        image: linuxserver/sonarr
+        container_name: jollyroger-sonarr
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+            - UMASK=022
+        volumes:
+            - $CONTAINER_DATA_PATH/sonarr:/config
+            - $MEDIA_STORAGE_PATH/Anime-TV:/media/anime-tv
+            - $MEDIA_STORAGE_PATH/Kids-Television:/media/kids-television
+            - $MEDIA_STORAGE_PATH/Television:/media/television
+            - $MEDIA_STORAGE_PATH/TV-Archives:/media/tv-archives
+            - $DOWNLOAD_STORAGE_PATH:/downloads
+        network_mode: "service:jollyroger-piavpn"
+        depends_on:
+            - jollyroger-piavpn
+            - jollyroger-jackett
+            - jollyroger-qbittorrent
+        restart: unless-stopped
+
+    jollyroger-flaresolverr:
+      image: flaresolverr/flaresolverr
+      container_name: jollyroger-flaresolverr
+      environment:
+        - TZ=$TIMEZONE
+      network_mode: "service:jollyroger-piavpn"
+      restart: unless-stopped
+
+    jollyroger-nginx:
+        image: dperson/nginx
+        container_name: jollyroger-nginx
+        environment:
+            - PUID=$PUID
+            - PGID=$PGID
+            - TZ=$TIMEZONE
+        networks:
+            app:
+                aliases:
+                    - jollyroger
+        depends_on:
+            - jollyroger-qbittorrent      # Torrent Client              
+            - jollyroger-jackett          # Jackett for Trackers
+            - jollyroger-radarr           # Radarr for Movies        
+            - jollyroger-sonarr           # Sonarr for TV Shows          
+        tmpfs:
+            - /run
+            - /tmp
+            - /var/cache/nginx
+        volumes:
+            - ./assets/nginx.sh:/usr/bin/nginx.sh
+        ports:
+            - "443:443"
+        command:
+            -w "http://jollyroger-piavpn:9117;/jackett;X-Forwarded-Host %24http_host;no"
+            -w "http://jollyroger-piavpn:8080/;/qbittorrent/"
+            -w "http://jollyroger-piavpn:8989;/sonarr"
+            -w "http://jollyroger-piavpn:7878;/radarr"
+            
+        restart: unless-stopped
+        
+networks:
+  app:
